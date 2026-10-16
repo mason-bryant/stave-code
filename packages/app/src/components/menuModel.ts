@@ -44,8 +44,12 @@ export interface MenuActions {
   zenMode: boolean;
   onUndo: () => void;
   onRedo: () => void;
-  canUndo: boolean;
-  canRedo: boolean;
+  /**
+   * What Undo / Redo will do — its name ("Undo Create song.strudel") and whether
+   * there is anything to do. Read when the list is built, i.e. when the menu is
+   * drawn, so it follows where the user was working before they opened it.
+   */
+  undoItem: (which: "undo" | "redo") => { label: string; enabled: boolean };
 }
 
 export type MenuEntry =
@@ -80,6 +84,8 @@ export function buildMenus(a: MenuActions): Menu[] {
     item(p.name, () => a.onOpenRecent(p.id), { shortcut: p.current ? "open now" : undefined, disabled: p.current }),
   );
   if (a.recentProjects.every((p) => p.current)) recent.push(item("No other projects", nothing, { disabled: true }));
+  const undo = a.undoItem("undo");
+  const redo = a.undoItem("redo");
 
   return [
     {
@@ -107,8 +113,8 @@ export function buildMenus(a: MenuActions): Menu[] {
       id: "edit",
       label: "Edit",
       items: [
-        item("Undo", a.onUndo, { shortcut: "⌘Z", disabled: !a.canUndo }),
-        item("Redo", a.onRedo, { shortcut: "⌘⇧Z", disabled: !a.canRedo }),
+        item(undo.label, a.onUndo, { shortcut: "⌘Z", disabled: !undo.enabled }),
+        item(redo.label, a.onRedo, { shortcut: "⌘⇧Z", disabled: !redo.enabled }),
         divider,
         item("Find...", nothing, { shortcut: "⌘F", disabled: true }),
       ],

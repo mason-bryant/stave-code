@@ -53,6 +53,13 @@ export interface ToastState {
    * location; plain info toasts leave it undefined.
    */
   onActivate?: () => void;
+  /**
+   * The action's own name, e.g. "Redo". When present the action is a separate
+   * button with this label beside the message, and clicking the body only
+   * dismisses — an action that changes the project should not run on a click
+   * meant to clear the toast away.
+   */
+  actionLabel?: string;
 }
 
 type Listener = () => void;
@@ -157,6 +164,7 @@ export function showToast(
   level: "info" | "error" = "info",
   ttlMs = 4000,
   onActivate?: () => void,
+  actionLabel?: string,
 ): void {
   // Dedupe: if the most recent visible toast carries the same message +
   // level, bump its count and extend its expiry instead of stacking a
@@ -172,6 +180,7 @@ export function showToast(
     // Repoint the click action at the LATEST emit — a re-fired error
     // may carry a fresh source line even when the message text matches.
     existing.onActivate = onActivate;
+    existing.actionLabel = actionLabel;
     toasts = [...toasts];
     notify();
     scheduleToastCleanup(existing.id);
@@ -184,6 +193,7 @@ export function showToast(
     expiresAt: Date.now() + ttlMs,
     count: 1,
     onActivate,
+    actionLabel,
   };
   // Append, then keep only the newest MAX_VISIBLE_TOASTS — a burst of distinct
   // errors drops the oldest rather than covering the screen. Dropped toasts are

@@ -67,6 +67,19 @@ export function getEditorForFile(fileId: string): MonacoEditor | undefined {
   return editors.get(fileId)
 }
 
+/**
+ * The code editor whose page area holds `el` — its text, or a widget inside it
+ * such as Find — or undefined. Looks at the registered editors, then at every
+ * editor Monaco knows (one inside a dialog is not registered).
+ */
+export function getEditorForElement(el: Element | null | undefined): MonacoEditor | undefined {
+  if (!el) return undefined
+  const holds = (ed: MonacoEditor): boolean => !!ed?.getDomNode?.()?.contains(el)
+  for (const ed of editors.values()) if (holds(ed)) return ed
+  const all: MonacoEditor[] = monacoNs?.editor?.getEditors?.() ?? []
+  return all.find(holds)
+}
+
 // ── Active editor ───────────────────────────────────────────────────
 // The Monaco editor the user is currently working in (last focused / mounted).
 // Visual-editing panels bind to it so they always act on the editor in view,

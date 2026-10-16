@@ -121,7 +121,7 @@ export function PhoneTopBar({
 
   return (
     <div style={styles.bar} data-phone-top-bar data-phone-top-held={sideways ? "sideways" : "upright"}>
-      <button type="button" style={styles.square} aria-label="Open project and menus" data-phone-top="drawer" onClick={onOpenDrawer}>
+      <button type="button" style={styles.square} aria-label="Open project and menus" data-phone-top="drawer" data-keeps-undo-target onClick={onOpenDrawer}>
         <Icon name="menu" size="20px" />
       </button>
 

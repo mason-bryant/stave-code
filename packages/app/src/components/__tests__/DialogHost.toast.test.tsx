@@ -200,3 +200,34 @@ describe("toast announcements (#1419)", () => {
     expect(container.querySelectorAll('[data-testid="toast"]')).toHaveLength(1);
   });
 });
+
+describe("a toast with a named action", () => {
+  it("shows the message, then a button with the action's name; only the button acts", () => {
+    const onRedo = vi.fn();
+    const { container } = render(<DialogHost />);
+    act(() => {
+      showToast("Removed song.strudel", "info", 4000, onRedo, "Redo");
+    });
+    const toast = container.querySelector('[data-testid="toast"]') as HTMLElement;
+    const action = container.querySelector('[data-testid="toast-action"]') as HTMLButtonElement;
+    expect(action.tagName).toBe("BUTTON");
+    expect(action.textContent).toBe("Redo");
+    expect(toast.textContent).toContain("Removed song.strudel");
+
+    // A click on the body clears the toast away, and does NOT redo.
+    act(() => {
+      fireEvent.click(toast);
+    });
+    expect(onRedo).not.toHaveBeenCalled();
+    expect(getToasts()).toHaveLength(0);
+
+    act(() => {
+      showToast("Removed song.strudel", "info", 4000, onRedo, "Redo");
+    });
+    act(() => {
+      fireEvent.click(container.querySelector('[data-testid="toast-action"]')!);
+    });
+    expect(onRedo).toHaveBeenCalledTimes(1);
+    expect(getToasts()).toHaveLength(0);
+  });
+});

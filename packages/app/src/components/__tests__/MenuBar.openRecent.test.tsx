@@ -35,8 +35,7 @@ function menu(recentProjects: RecentProjectEntry[], onOpenRecent = vi.fn()) {
       zenMode={false}
       onUndo={noop}
       onRedo={noop}
-      canUndo={false}
-      canRedo={false}
+      undoItem={(which) => ({ label: which === "undo" ? "Undo" : "Redo", enabled: false })}
       isPlaying={false}
       getSongPosition={() => null}
       getCps={() => null}

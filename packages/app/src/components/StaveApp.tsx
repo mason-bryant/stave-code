@@ -14,13 +14,7 @@ import {
   setActiveHistoryFile,
   setFileHistoryTarget,
   HistoryPanel,
-  undo,
-  redo,
-  canUndo,
-  canRedo,
   subscribeToUndoState,
-  codeEditorForFocus,
-  codeUndoForFocus,
   dropLegacyBackgroundCrop,
   type CropRegion,
   type ProjectMeta,
@@ -73,6 +67,8 @@ import {
 } from "./backdropCropStore";
 import { DialogHost } from "./DialogHost";
 import { showPrompt, showToast, showConfirm } from "../dialogs/host";
+import { runUndo, undoAvailable, undoMenuItem } from "../lib/undoCommand";
+import { focusBeforeMenu, trackFocusBeforeMenus } from "../lib/undoFocus";
 import { CommandPalette, type PaletteRow } from "./CommandPalette";
 import { WorkspaceSearchView, type WorkspaceSearchViewHandle } from "./WorkspaceSearchView";
 import { ActivityBar } from "./ActivityBar";
@@ -291,7 +287,9 @@ export function StaveApp({ initialProject }: StaveAppProps) {
   );
   const [startScreenAtStart, setStartScreenAtStart] = useState(startScreenWanted);
   const [switcherModalOpen, setSwitcherModalOpen] = useState(false);
-  const [undoState, setUndoState] = useState({ canUndo: false, canRedo: false });
+  // Bumped when the project's file-change history moves, so the Edit menu's
+  // Undo / Redo labels follow it.
+  const [, setUndoRevision] = useState(0);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [quickOpenOpen, setQuickOpenOpen] = useState(false);
   // Unified settings window (#739) — one shell, two tabs. `settingsTab`
@@ -577,12 +575,16 @@ export function StaveApp({ initialProject }: StaveAppProps) {
   }, [zenMode]);
 
   // Subscribe to the structural undo manager so Edit menu items can
-  // enable/disable reactively.
+  // enable/disable and rename themselves reactively.
   useEffect(() => {
-    const update = () => setUndoState({ canUndo: canUndo(), canRedo: canRedo() });
+    const update = () => setUndoRevision((n) => n + 1);
     update();
     return subscribeToUndoState(update);
   }, [activeProject.id]);
+
+  // Edit → Undo acts where ⌘Z would have, so it needs to know where focus was
+  // before the menu took it.
+  useEffect(() => trackFocusBeforeMenus(), []);
 
   // Open the Version History side panel — now backed by the project commit
   // store (HistoryPanel), not the retired legacy snapshotStore.
@@ -1701,9 +1703,9 @@ export function StaveApp({ initialProject }: StaveAppProps) {
       keybinding: "mod+z",
       where: UNDO_WHERE,
       // #1800 — a panel that edits code undoes in that code's history; only
-      // elsewhere does ⌘Z undo file changes.
-      when: () => !!codeEditorForFocus(document.activeElement) || canUndo(),
-      run: () => { if (!codeUndoForFocus(document.activeElement, "undo")) undo(); },
+      // elsewhere does ⌘Z undo file changes. Edit → Undo routes the same way.
+      when: () => undoAvailable("undo", document.activeElement),
+      run: () => runUndo("undo", document.activeElement),
     }));
     unregs.push(registerCommand({
       id: "stave.edit.redo",
@@ -1711,8 +1713,8 @@ export function StaveApp({ initialProject }: StaveAppProps) {
       category: "Edit",
       keybinding: "mod+shift+z",
       where: UNDO_WHERE,
-      when: () => !!codeEditorForFocus(document.activeElement) || canRedo(),
-      run: () => { if (!codeUndoForFocus(document.activeElement, "redo")) redo(); },
+      when: () => undoAvailable("redo", document.activeElement),
+      run: () => runUndo("redo", document.activeElement),
     }));
     unregs.push(registerCommand({
       id: "stave.view.toggleSidebar",
@@ -2005,10 +2007,10 @@ export function StaveApp({ initialProject }: StaveAppProps) {
     sidebarCollapsed,
     onToggleZenMode: () => setZenMode((z) => !z),
     zenMode,
-    onUndo: () => { undo(); },
-    onRedo: () => { redo(); },
-    canUndo: undoState.canUndo,
-    canRedo: undoState.canRedo,
+    // Where ⌘Z would have acted just before the menu was opened.
+    onUndo: () => { void runUndo("undo", focusBeforeMenu(), { refocus: true }); },
+    onRedo: () => { void runUndo("redo", focusBeforeMenu(), { refocus: true }); },
+    undoItem: (which) => undoMenuItem(which, focusBeforeMenu()),
   };
   // #1348 — the eval lamp: the active file's last evaluation. Pressing it does what
   // pressing that error's toast does, even after the toast is gone; with no error it

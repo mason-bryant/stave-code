@@ -142,20 +142,39 @@ function ToastStack({ toasts }: { toasts: ToastState[] }) {
             position: "relative",
             // Only the actionable (error) toasts advertise clickability;
             // plain info toasts keep the default arrow cursor.
-            cursor: t.onActivate ? "pointer" : "default",
+            cursor: t.onActivate && !t.actionLabel ? "pointer" : "default",
           }}
           // Body click: run the toast's action (open Console + jump to the
           // error line) when it has one, then clear it. Info toasts with no
           // action just dismiss on body click, as before. The close (×)
           // button below dismisses WITHOUT firing the action.
           onClick={() => {
-            t.onActivate?.();
+            // A NAMED action ("Redo") runs from its own button only.
+            if (!t.actionLabel) t.onActivate?.();
             dismissToast(t.id);
           }}
         >
           {/* Reserve right-edge space: ~20px clears the top-right × on every
               toast; the bottom-right ×N count badge needs a touch more. */}
-          {t.onActivate ? (
+          {t.onActivate && t.actionLabel ? (
+            // A toast with a NAMED action: the message, then a button saying
+            // what it does — "Removed song.strudel  [Redo]".
+            <span style={{ ...styles.toastWithAction, paddingRight: t.count > 1 ? 28 : 20 }}>
+              <span>{t.message}</span>
+              <button
+                type="button"
+                data-testid="toast-action"
+                style={styles.toastNamedAction}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  t.onActivate?.();
+                  dismissToast(t.id);
+                }}
+              >
+                {t.actionLabel}
+              </button>
+            </span>
+          ) : t.onActivate ? (
             // An ACTIONABLE toast renders its message as a real button, so the
             // action is reachable by keyboard. The whole-body click above stays
             // for the mouse; this adds the tab stop, the Enter/Space handling
@@ -351,6 +370,22 @@ const styles: Record<string, React.CSSProperties> = {
     margin: 0,
     color: "inherit",
     font: "inherit",
+    cursor: "pointer",
+  },
+  toastWithAction: {
+    display: "flex",
+    alignItems: "center",
+    gap: 12,
+  },
+  toastNamedAction: {
+    flex: "none",
+    background: "none",
+    border: "1px solid var(--border-strong)",
+    borderRadius: 3,
+    padding: "2px 8px",
+    color: "var(--accent)",
+    font: "inherit",
+    fontWeight: 600,
     cursor: "pointer",
   },
   toastClose: {
