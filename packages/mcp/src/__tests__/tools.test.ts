@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import { StaveBridge } from '../bridge'
 import { DEFAULT_ORIGINS, pairingCode } from '../config'
-import { ERROR_CODES, type Diagnostics, type WriteResult } from '../protocol'
+import { ERROR_CODES, type Diagnostics, type ProjectOpened, type WriteResult } from '../protocol'
 import { createStaveMcpServer } from '../server'
 import { dial, type Handler } from './fakePage'
 
@@ -54,9 +54,12 @@ describe('Stave MCP tools', () => {
       [
         'capture_canvas',
         'create_file',
+        'create_project',
         'edit_file',
         'get_diagnostics',
         'list_files',
+        'list_projects',
+        'open_project',
         'read_file',
         'rename_file',
         'stave_status',
@@ -178,5 +181,87 @@ describe('Stave MCP tools', () => {
     const t = textOf(await callTool('get_diagnostics', { path: 'v.hydra' }))
     expect(t).toContain('v.hydra: no errors — compiled only')
     expect(t).toContain('Open its preview')
+  })
+
+  it('list_projects shows each project, the open one marked', async () => {
+    const at = Date.UTC(2026, 9, 16, 19, 1)
+    await pageWith({
+      'projects.list': () => ({
+        projects: [
+          { id: 'p1', name: 'Night drive', open: true, createdAt: at, lastOpenedAt: at },
+          { id: 'p2', name: 'Sketch', open: false, createdAt: at, lastOpenedAt: at - 86_400_000 },
+        ],
+      }),
+    })
+    const t = textOf(await callTool('list_projects'))
+    expect(t).toContain('2 projects, most recently opened first:')
+    expect(t).toContain('- "Night drive" [open] — id p1, last opened 2026-10-16 19:01 UTC')
+    expect(t).toContain('- "Sketch" — id p2, last opened 2026-10-15 19:01 UTC')
+  })
+
+  it('create_project passes the name and says the project is ready for files', async () => {
+    let received: unknown = null
+    await pageWith({
+      'projects.create': (p) => {
+        received = p
+        const r: ProjectOpened = { project: { id: 'p9', name: 'Song for Ada' }, switched: true, ready: true, files: 8 }
+        return r
+      },
+    })
+    const t = textOf(await callTool('create_project', { name: '  Song for Ada ' }))
+    expect(received).toEqual({ name: 'Song for Ada' })
+    expect(t).toContain('Created project "Song for Ada" (id p9) and switched the Stave tab to it.')
+    expect(t).toContain('only Stave\'s bundled visuals under preset/ (8 files)')
+    expect(t).toContain('The file tools now act on this project.')
+
+    const blank = await callTool('create_project', { name: '   ' })
+    expect(blank.isError).toBe(true)
+  })
+
+  it('a project that has not finished loading says to wait before writing', async () => {
+    await pageWith({
+      'projects.create': () => ({ project: { id: 'p9', name: 'Slow' }, switched: true, ready: false, files: 0 }),
+    })
+    expect(textOf(await callTool('create_project', { name: 'Slow' }))).toContain('has not finished loading yet; call stave_status')
+  })
+
+  it('open_project takes an id or a name, not both or neither', async () => {
+    const received: unknown[] = []
+    await pageWith({
+      'projects.open': (p) => {
+        received.push(p)
+        const already = (p as { id?: string }).id === 'p1'
+        return { project: { id: already ? 'p1' : 'p2', name: already ? 'Night drive' : 'Sketch' }, switched: !already, ready: true, files: 3 }
+      },
+    })
+    expect(textOf(await callTool('open_project', { name: 'Sketch' }))).toContain('Switched the Stave tab to project "Sketch" (id p2, 3 files).')
+    expect(textOf(await callTool('open_project', { id: 'p1' }))).toContain('"Night drive" (id p1, 3 files) was already open; nothing changed.')
+    expect(received).toEqual([{ name: 'Sketch' }, { id: 'p1' }])
+
+    for (const args of [{}, { id: 'p1', name: 'Sketch' }]) {
+      const r = await callTool('open_project', args)
+      expect(r.isError).toBe(true)
+      expect(textOf(r)).toContain('either `id` or `name`')
+    }
+    expect(received).toHaveLength(2)
+  })
+
+  it('a project refusal from the tab comes back as a tool error with its message', async () => {
+    await pageWith({
+      'projects.create': () => {
+        throw Object.assign(new Error('Storage is full and the open project has changes the browser could not save'), { code: ERROR_CODES.unsaved })
+      },
+    })
+    const r = await callTool('create_project', { name: 'New' })
+    expect(r.isError).toBe(true)
+    expect(textOf(r)).toContain('Storage is full')
+  })
+
+  it('a tab from before the project tools says to reload it', async () => {
+    await pageWith({}) // answers every request with -32601, as an older tab does
+    const r = await callTool('list_projects')
+    expect(r.isError).toBe(true)
+    expect(textOf(r)).toContain('older Stave that cannot do this yet')
+    expect(textOf(r)).toContain('reload the tab')
   })
 })

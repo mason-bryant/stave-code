@@ -10,7 +10,9 @@
  *  - it is a LOCAL change, so History records it — a remote Yjs update would not
  *    be (historyDriver listens with { localOnly: true });
  *  - a playing song re-evaluates, and a bad edit's error comes back to the agent;
- *  - a visual on screen redraws, and the agent can see it.
+ *  - a visual on screen redraws, and the agent can see it;
+ *  - a project the agent creates is the one the tab switches to, and is ready
+ *    when the call answers: the next file lands in it and History records it.
  * The bridge's refusals (origin, host, token) are unit-tested in packages/mcp.
  */
 import { createHash } from 'node:crypto'
@@ -217,4 +219,49 @@ test('a new Hydra visual: created, put on screen, edited live, captured, and its
 
   const syntaxError = await mcp.text('edit_file', { path: 'visuals/agent.hydra', edits: [{ old_text: '.kaleidoscope(5)', new_text: '.kaleid(5' }] })
   expect(syntaxError).toContain('SyntaxError')
+})
+
+test('a new project: the tab switches to it, the next file lands in it, and open_project goes back', async ({ page }) => {
+  await preparePairing(page, mcp.pairingCode)
+  await bootApp(page)
+  await waitForPairing()
+
+  const before = await mcp.text('list_projects')
+  const original = /- "(.+)" \[open\] — id (\S+),/.exec(before)
+  expect(original, before).toBeTruthy()
+  const [, originalName, originalId] = original!
+
+  const name = `Agent song ${Date.now().toString(36)}`
+  const created = await mcp.text('create_project', { name })
+  expect(created).toContain(`Created project "${name}"`)
+  expect(created).toContain('The file tools now act on this project.')
+  expect(await mcp.text('stave_status')).toContain(`Project: "${name}"`)
+
+  // Straight after: no waiting here, the call answered once the project was ready.
+  const file = await mcp.text('create_file', { path: 'agent-song.strudel', content: SONG })
+  expect(file).toContain('Created agent-song.strudel')
+  // Its own commit, not folded into the new project's first one.
+  expect(file).toContain('recorded in History')
+
+  const files = await mcp.text('list_files')
+  expect(files).toContain(`Project "${name}":`)
+  expect(files).toContain('agent-song.strudel — strudel, 4 lines')
+  const fileInTree = page.locator('[data-sidebar] [data-file-tree-item]').filter({ has: page.locator('text="agent-song.strudel"') })
+  await expect(fileInTree).toBeVisible()
+
+  const listed = await mcp.text('list_projects')
+  expect(listed).toContain(`- "${name}" [open] — id `)
+  expect(listed).toContain(`- "${originalName}" — id ${originalId},`)
+
+  // Back to where the user was: the agent's file is not in that project.
+  expect(await mcp.text('open_project', { id: originalId })).toContain(`Switched the Stave tab to project "${originalName}"`)
+  expect(await mcp.text('list_files')).not.toContain('agent-song.strudel')
+  await expect(fileInTree).toHaveCount(0)
+
+  // And by name to the new one again: the file was saved with it.
+  expect(await mcp.text('open_project', { name })).toContain(`Switched the Stave tab to project "${name}"`)
+  expect(await mcp.text('read_file', { path: 'agent-song.strudel' })).toBe(SONG)
+  await expect(fileInTree).toBeVisible()
+  await page.getByRole('button', { name: 'Version History' }).click()
+  await expect(page.getByText('Claude Code: created agent-song.strudel').first()).toBeVisible()
 })

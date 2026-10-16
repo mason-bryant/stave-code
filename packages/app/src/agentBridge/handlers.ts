@@ -21,6 +21,13 @@ import {
 import { extensionToLanguage, starterCodeFor } from "../lib/newFile";
 import { isPlaceholder, pathTaken } from "../lib/fileTreeOps";
 import { captureCanvas, findVisualCanvas, isVisualOnScreen } from "./captureCanvas";
+import {
+  ProjectSwitchRefused,
+  getAgentProjectAccess,
+  isAgentProjectReady,
+  whenAgentProjectReady,
+  type AgentProjectAccess,
+} from "./projectAccess";
 import { getAgentRuntimeAccess, type EvaluationOutcome } from "./runtimeAccess";
 import { TextEditError, applyTextEdits, diffEdits } from "./textEdits";
 import {
@@ -31,6 +38,7 @@ import {
   type FileSummary,
   type ParamsOf,
   type ProjectInfo,
+  type ProjectOpened,
   type ResultOf,
   type StaveMethod,
   type WriteResult,
@@ -63,6 +71,13 @@ const VISUAL_RECOMPILE_MAX_MS = 2500;
  * measured past 500ms in a headless run.
  */
 const VISUAL_DRAW_GRACE_MS = 1500;
+
+/**
+ * How long a switched-to project gets to become ready: the editor remounting on
+ * it and History loading. Its storage was already opened (each open is bounded,
+ * #687) before this wait starts. Within stave-mcp's 25s for a switch.
+ */
+const PROJECT_READY_MAX_MS = 12_000;
 
 const SONG_LANGUAGES: ReadonlySet<string> = new Set(["strudel", "sonicpi"]);
 const VISUAL_RUNTIME: Readonly<Record<string, RuntimeId>> = { hydra: "hydra", p5js: "p5", glsl: "glsl" };
@@ -274,6 +289,44 @@ async function diagnose(fileId: string, ctx: DiagnoseContext): Promise<Diagnosti
   return { ...base, evaluated: "none", errors: [], warnings: [] };
 }
 
+function projectAccess(): AgentProjectAccess {
+  const access = getAgentProjectAccess();
+  if (!access) fail("notReady", "This Stave tab cannot switch projects yet (it is still starting); try again in a moment.");
+  return access;
+}
+
+/** Nothing exits a History time-travel view on a project switch, so it would carry over to the next project. */
+function assertCanLeave(): void {
+  if (isViewing()) {
+    fail("readOnly", "Stave is showing a past version from History. Ask the user to exit that view before switching projects.");
+  }
+}
+
+/** Run a switch, answering its refusals with their codes. */
+async function runSwitch(run: () => Promise<{ id: string; name: string }>): Promise<ProjectInfo> {
+  try {
+    const meta = await run();
+    return { id: meta.id, name: meta.name };
+  } catch (err) {
+    if (err instanceof ProjectSwitchRefused) {
+      if (err.reason === "unsaved") {
+        fail(
+          "unsaved",
+          "Storage is full and the open project has changes the browser could not save, so Stave will not leave it. Ask the user to export it or free space (and press Try again) first.",
+        );
+      }
+      fail("notReady", "Stave is already switching projects; try again in a moment.");
+    }
+    throw new Error(`Stave could not switch projects: ${err instanceof Error ? err.message : String(err)}`);
+  }
+}
+
+/** The answer once the tab is on `project`: waited on until its editor and History have started. */
+async function opened(project: ProjectInfo, switched: boolean): Promise<ProjectOpened> {
+  const ready = (await whenAgentProjectReady(project.id, PROJECT_READY_MAX_MS)) && isDocReady();
+  return { project, switched, ready, files: visibleFiles().length };
+}
+
 export function createBridgeHandlers(deps: HandlerDeps): BridgeHandlers {
   const notify = (message: string): void => deps.onAgentChange?.(message);
 
@@ -433,6 +486,65 @@ export function createBridgeHandlers(deps: HandlerDeps): BridgeHandlers {
       } catch (err) {
         fail("noCanvas", err instanceof Error ? err.message : String(err));
       }
+    },
+
+    async "projects.list"() {
+      const open = deps.getProject()?.id ?? null;
+      const projects = await projectAccess().list();
+      return {
+        projects: projects.map((p) => ({
+          id: p.id,
+          name: p.name,
+          open: p.id === open,
+          createdAt: p.createdAt,
+          lastOpenedAt: p.lastOpenedAt,
+        })),
+      };
+    },
+
+    async "projects.create"({ name }) {
+      const access = projectAccess();
+      const wanted = typeof name === "string" ? name.trim() : "";
+      if (wanted === "") fail("badName", "A project needs a name.");
+      const same = (await access.list()).filter((p) => p.name === wanted);
+      if (same.length > 0) {
+        fail("conflict", `A project named "${wanted}" already exists (id ${same[0].id}). Open it with open_project, or choose another name.`);
+      }
+      assertCanLeave();
+      const project = await runSwitch(() => access.create(wanted));
+      notify(`Claude created the project ${project.name}`);
+      return opened(project, true);
+    },
+
+    async "projects.open"({ id, name }) {
+      const access = projectAccess();
+      const projects = await access.list();
+      let target: { id: string; name: string } | undefined;
+      if (typeof id === "string" && id !== "") {
+        target = projects.find((p) => p.id === id);
+        if (!target) fail("notFound", `No project with id "${id}". Use list_projects to see them.`);
+      } else if (typeof name === "string" && name !== "") {
+        const named = projects.filter((p) => p.name === name);
+        if (named.length > 1) {
+          fail("ambiguous", `${named.length} projects are named "${name}"; open one by id: ${named.map((p) => p.id).join(", ")}.`);
+        }
+        target = named[0];
+        if (!target) {
+          const near = projects.filter((p) => p.name.trim().toLowerCase() === name.trim().toLowerCase()).map((p) => `"${p.name}"`);
+          fail("notFound", `No project named "${name}".${near.length ? ` Did you mean ${near.join(", ")}?` : " Use list_projects to see them."}`);
+        }
+      } else {
+        fail("notFound", "Name the project to open by id or by name.");
+      }
+
+      const current = deps.getProject();
+      if (current?.id === target.id) {
+        return { project: current, switched: false, ready: isAgentProjectReady(target.id) && isDocReady(), files: visibleFiles().length };
+      }
+      assertCanLeave();
+      const project = await runSwitch(() => access.open(target.id));
+      notify(`Claude opened the project ${project.name}`);
+      return opened(project, true);
     },
   };
 }

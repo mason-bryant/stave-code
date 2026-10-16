@@ -15,7 +15,13 @@
  * ends up in the app's bundle.
  */
 
-/** Bumped when a method changes shape. A tab speaking another version is refused. */
+/**
+ * Bumped when a method changes shape. A tab speaking another version is refused.
+ *
+ * Adding a method does NOT bump it: a tab that lacks one answers -32601 (method
+ * not found), and the tool says the tab needs reloading. Bumping would refuse
+ * every older tab outright, including for the methods it does support.
+ */
 export const PROTOCOL_VERSION = 1 as const
 
 /** Where stave-mcp listens unless STAVE_MCP_PORT says otherwise. */
@@ -35,9 +41,9 @@ export const CLOSE_CODES = {
 
 /** JSON-RPC error codes the tab returns (beside the standard -326xx ones). */
 export const ERROR_CODES = {
-  /** No file at that path. */
+  /** No file at that path, or no project with that id or name. */
   notFound: 1001,
-  /** A file already exists at that path. */
+  /** A file already exists at that path, or a project with that name. */
   conflict: 1002,
   /** The tab is showing a past version (History time-travel) and is read-only. */
   readOnly: 1003,
@@ -45,7 +51,10 @@ export const ERROR_CODES = {
   notReady: 1004,
   /** An edit's `oldText` is not in the file. */
   noMatch: 1005,
-  /** An edit's `oldText` appears more than once and `replaceAll` was not set. */
+  /**
+   * An edit's `oldText` appears more than once and `replaceAll` was not set, or
+   * more than one project has the name asked for.
+   */
   ambiguous: 1006,
   /** Nothing to capture (no visual on screen for that file). */
   noCanvas: 1007,
@@ -53,6 +62,13 @@ export const ERROR_CODES = {
   badPath: 1008,
   /** The pairing token did not match (answer to `bridge.hello`). */
   badToken: 1009,
+  /**
+   * Storage is full and the open project has changes the disk refused; leaving
+   * it would lose them, so the tab will not switch projects.
+   */
+  unsaved: 1010,
+  /** A project name that is empty, or only spaces. */
+  badName: 1011,
 } as const
 
 // ── Shared shapes ──────────────────────────────────────────────────────────
@@ -148,6 +164,32 @@ export interface CanvasCapture {
   readonly blank: boolean
 }
 
+export interface ProjectSummary {
+  readonly id: string
+  readonly name: string
+  /** This is the project open in the tab, which the file tools act on. */
+  readonly open: boolean
+  /** When the project was created, ms since the epoch. */
+  readonly createdAt: number
+  /** When the project was last opened, ms since the epoch. */
+  readonly lastOpenedAt: number
+}
+
+/** The answer to `projects.create` and `projects.open`. */
+export interface ProjectOpened {
+  readonly project: ProjectInfo
+  /** False when it was already the open project, so nothing changed. */
+  readonly switched: boolean
+  /**
+   * The project's document has loaded, Stave's bundled visuals are seeded, and
+   * History has started for it — so a write made now lands in this project and
+   * is recorded. False when that did not happen in time.
+   */
+  readonly ready: boolean
+  /** Files in the project (Stave's bundled visuals under preset/ included). */
+  readonly files: number
+}
+
 export interface ProjectStatus {
   readonly project: ProjectInfo | null
   readonly ready: boolean
@@ -188,6 +230,11 @@ export interface StaveMethods {
   'files.rename': { params: { path: string; newPath: string }; result: { path: string; newPath: string } }
   'diagnostics.get': { params: { path: string }; result: Diagnostics }
   'canvas.capture': { params: { path?: string; maxWidth?: number }; result: CanvasCapture }
+  'projects.list': { params: Record<string, never>; result: { projects: ProjectSummary[] } }
+  /** Create an empty project and switch the tab to it. */
+  'projects.create': { params: { name: string }; result: ProjectOpened }
+  /** Switch the tab to an existing project, by `id` or by exact `name` (give one). */
+  'projects.open': { params: { id?: string; name?: string }; result: ProjectOpened }
 }
 
 export type StaveMethod = keyof StaveMethods

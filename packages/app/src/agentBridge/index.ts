@@ -7,6 +7,12 @@ import type { ProjectInfo } from "./types";
 export type { AgentBridgeState } from "./connector";
 export { registerAgentRuntimeAccess, type AgentRuntimeAccess } from "./runtimeAccess";
 export {
+  ProjectSwitchRefused,
+  markAgentProjectReady,
+  registerAgentProjectAccess,
+  type AgentProjectAccess,
+} from "./projectAccess";
+export {
   getAgentBridgeSettings,
   parsePairingCode,
   setAgentBridgeSettings,

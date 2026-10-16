@@ -1,16 +1,20 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   clearLog,
   createWorkspaceFile,
   deleteWorkspaceFile,
   emitFixed,
   emitLog,
+  enterRuntimeView,
+  exitRuntimeView,
   getFile,
   listWorkspaceFiles,
   registerReevalHandler,
+  type ProjectMeta,
 } from "@stave/editor";
 
 import { createBridgeHandlers } from "../handlers";
+import { ProjectSwitchRefused, markAgentProjectReady, registerAgentProjectAccess } from "../projectAccess";
 import { registerAgentRuntimeAccess, type AgentRuntimeAccess } from "../runtimeAccess";
 import { BridgeRequestError, ERROR_CODES } from "../types";
 
@@ -208,5 +212,157 @@ describe("agent bridge handlers — status and capture", () => {
     const err = await refusal(handlers["canvas.capture"]({ path: "visuals/waves.hydra" }));
     expect(err.code).toBe(ERROR_CODES.noCanvas);
     expect(err.message).toContain("not drawing on screen");
+  });
+});
+
+describe("agent bridge handlers — projects", () => {
+  const T0 = Date.UTC(2026, 9, 16, 12, 0);
+
+  /**
+   * StaveApp's side of the seam, in miniature: a project list, the open one,
+   * and a switch whose editor reports ready only when the test says so — the
+   * remount and History start the real one waits for.
+   */
+  function projectList(opts: { refuse?: "unsaved" | "busy" } = {}) {
+    const list: ProjectMeta[] = [
+      { id: "p1", name: "Test", createdAt: T0, lastOpenedAt: T0 + 3000 },
+      { id: "p2", name: "Night drive", createdAt: T0, lastOpenedAt: T0 + 2000 },
+      { id: "p3", name: "Twins", createdAt: T0, lastOpenedAt: T0 + 1000 },
+      { id: "p4", name: "Twins", createdAt: T0, lastOpenedAt: T0 },
+    ];
+    const state = { open: "p1", switches: [] as string[], mount: (id: string) => void unregister.push(markAgentProjectReady(id)) };
+    const enter = async (meta: ProjectMeta): Promise<ProjectMeta> => {
+      if (opts.refuse) throw new ProjectSwitchRefused(opts.refuse);
+      state.switches.push(meta.id);
+      state.open = meta.id;
+      queueMicrotask(() => state.mount(meta.id));
+      return meta;
+    };
+    unregister.push(
+      registerAgentProjectAccess({
+        list: async () => [...list].sort((a, b) => b.lastOpenedAt - a.lastOpenedAt),
+        create: (name) => {
+          const meta = { id: `p${list.length + 1}`, name, createdAt: T0 + 9000, lastOpenedAt: T0 + 9000 };
+          return enter(meta).then(() => (list.push(meta), meta));
+        },
+        open: (id) => enter(list.find((p) => p.id === id)!),
+      }),
+    );
+    unregister.push(markAgentProjectReady("p1"));
+    const toasts: string[] = [];
+    const h = createBridgeHandlers({
+      getProject: () => {
+        const p = list.find((m) => m.id === state.open)!;
+        return { id: p.id, name: p.name };
+      },
+      onAgentChange: (m) => toasts.push(m),
+    });
+    return { h, state, toasts };
+  }
+
+  afterEach(() => {
+    exitRuntimeView();
+    vi.useRealTimers();
+  });
+
+  it("lists every project, most recently opened first, marking the open one", async () => {
+    const { h } = projectList();
+    const { projects } = await h["projects.list"]({});
+    expect(projects.map((p) => [p.id, p.open])).toEqual([
+      ["p1", true],
+      ["p2", false],
+      ["p3", false],
+      ["p4", false],
+    ]);
+    expect(projects[1]).toEqual({ id: "p2", name: "Night drive", open: false, createdAt: T0, lastOpenedAt: T0 + 2000 });
+  });
+
+  it("creates a project, switches to it, and answers only once its editor is ready", async () => {
+    const { h, state, toasts } = projectList();
+    let mount: () => void = () => {};
+    state.mount = (id) => {
+      mount = () => void unregister.push(markAgentProjectReady(id));
+    };
+    let answered = false;
+    const pending = h["projects.create"]({ name: "  Song for Ada  " }).then((r) => ((answered = true), r));
+    await new Promise((r) => setTimeout(r, 30));
+    expect(state.switches).toEqual(["p5"]);
+    expect(answered).toBe(false);
+    mount();
+    await expect(pending).resolves.toEqual({ project: { id: "p5", name: "Song for Ada" }, switched: true, ready: true, files: 2 });
+    expect(toasts).toEqual(["Claude created the project Song for Ada"]);
+  });
+
+  it("says the new project is not ready when its editor never reports in", async () => {
+    vi.useFakeTimers();
+    const { h, state } = projectList();
+    state.mount = () => {};
+    const pending = h["projects.create"]({ name: "Slow" });
+    await vi.advanceTimersByTimeAsync(12_000);
+    await expect(pending).resolves.toMatchObject({ project: { name: "Slow" }, switched: true, ready: false });
+  });
+
+  it("refuses a blank or taken name before creating anything", async () => {
+    const { h, state } = projectList();
+    expect((await refusal(h["projects.create"]({ name: "   " }))).code).toBe(ERROR_CODES.badName);
+    const taken = await refusal(h["projects.create"]({ name: "Night drive" }));
+    expect(taken.code).toBe(ERROR_CODES.conflict);
+    expect(taken.message).toContain("id p2");
+    expect(state.switches).toEqual([]);
+  });
+
+  it("will not leave a project whose changes storage refused, nor switch while switching", async () => {
+    const unsaved = await refusal(projectList({ refuse: "unsaved" }).h["projects.create"]({ name: "New" }));
+    expect(unsaved.code).toBe(ERROR_CODES.unsaved);
+    expect(unsaved.message).toContain("Storage is full");
+    const busy = await refusal(projectList({ refuse: "busy" }).h["projects.open"]({ id: "p2" }));
+    expect(busy.code).toBe(ERROR_CODES.notReady);
+  });
+
+  it("will not switch while the user is viewing a past version", async () => {
+    const { h, state } = projectList();
+    enterRuntimeView("c1", {});
+    expect((await refusal(h["projects.create"]({ name: "New" }))).code).toBe(ERROR_CODES.readOnly);
+    expect((await refusal(h["projects.open"]({ id: "p2" }))).code).toBe(ERROR_CODES.readOnly);
+    expect(state.switches).toEqual([]);
+  });
+
+  it("opens a project by id or by exact name", async () => {
+    const { h, state, toasts } = projectList();
+    await expect(h["projects.open"]({ name: "Night drive" })).resolves.toEqual({
+      project: { id: "p2", name: "Night drive" },
+      switched: true,
+      ready: true,
+      files: 2,
+    });
+    await expect(h["projects.open"]({ id: "p1" })).resolves.toMatchObject({ project: { id: "p1" }, switched: true });
+    expect(state.switches).toEqual(["p2", "p1"]);
+    expect(toasts).toEqual(["Claude opened the project Night drive", "Claude opened the project Test"]);
+  });
+
+  it("does nothing for the project already open", async () => {
+    const { h, state } = projectList();
+    await expect(h["projects.open"]({ name: "Test" })).resolves.toEqual({
+      project: { id: "p1", name: "Test" },
+      switched: false,
+      ready: true,
+      files: 2,
+    });
+    expect(state.switches).toEqual([]);
+  });
+
+  it("refuses a name two projects share, and names near misses for one nobody has", async () => {
+    const { h } = projectList();
+    const twins = await refusal(h["projects.open"]({ name: "Twins" }));
+    expect(twins.code).toBe(ERROR_CODES.ambiguous);
+    expect(twins.message).toContain("p3, p4");
+    const near = await refusal(h["projects.open"]({ name: "night drive" }));
+    expect(near.code).toBe(ERROR_CODES.notFound);
+    expect(near.message).toContain('Did you mean "Night drive"?');
+    expect((await refusal(h["projects.open"]({ id: "p9" }))).code).toBe(ERROR_CODES.notFound);
+  });
+
+  it("says the tab is not ready when nothing can switch projects yet", async () => {
+    expect((await refusal(handlers["projects.list"]({}))).code).toBe(ERROR_CODES.notReady);
   });
 });
