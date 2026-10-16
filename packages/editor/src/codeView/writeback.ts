@@ -70,6 +70,9 @@ export type WriteSource =
   // inspector's knobs do, from a different surface with a different failure
   // mode, and a Console line that cannot tell them apart is not an instrument.
   | 'region.trim'
+  // Claude Code, through the app's stave-mcp bridge: an edit the user asked an
+  // agent to make, landing as one undo step like any other surface's.
+  | 'agent'
 
 /** A single replacement, addressed by absolute pre-edit doc offsets. */
 export interface OffsetEdit {

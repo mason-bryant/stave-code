@@ -7,6 +7,14 @@
     "runs": "gate",
     "why": "collected by the gate \u2014 it runs the whole chromium project"
   },
+  "agent-bridge-browsers.spec.ts": {
+    "runs": "gate",
+    "why": "collected by the gate — it runs the whole chromium project; it skips unless STAVE_OBSERVE_BRIDGE is set, since it measures browsers (and real Chrome over the network), not this repo"
+  },
+  "agent-bridge.spec.ts": {
+    "runs": "gate",
+    "why": "collected by the gate — it runs the whole chromium project"
+  },
   "asset-doc-reload.spec.ts": {
     "runs": "gate",
     "why": "collected by the gate \u2014 it runs the whole chromium project"

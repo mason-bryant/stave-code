@@ -73,6 +73,7 @@ import {
 } from "./backdropCropStore";
 import { DialogHost } from "./DialogHost";
 import { showPrompt, showToast, showConfirm } from "../dialogs/host";
+import { getAgentBridge, startAgentBridge } from "../agentBridge";
 import { CommandPalette, type PaletteRow } from "./CommandPalette";
 import { WorkspaceSearchView, type WorkspaceSearchViewHandle } from "./WorkspaceSearchView";
 import { ActivityBar } from "./ActivityBar";
@@ -321,6 +322,22 @@ export function StaveApp({ initialProject }: StaveAppProps) {
   useEffect(() => {
     installEngineLogMarkers();
   }, []);
+
+  // The Claude Code bridge (src/agentBridge): idle until the user turns it on in
+  // Settings → Claude Code. It acts on whichever project is open, so it reads
+  // the project through a ref and is told when the user switches.
+  const activeProjectRef = useRef(activeProject);
+  activeProjectRef.current = activeProject;
+  useEffect(() => {
+    startAgentBridge({
+      appVersion: APP_VERSION,
+      getProject: () => ({ id: activeProjectRef.current.id, name: activeProjectRef.current.name }),
+      onAgentChange: (message) => showToast(message, "info", 3000),
+    });
+  }, []);
+  useEffect(() => {
+    getAgentBridge()?.projectChanged();
+  }, [activeProject.id, activeProject.name]);
 
   // Tell other tabs this one is open (#1785). A collection in another tab
   // refuses to run while this lock is held: this tab's memory may name sounds

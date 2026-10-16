@@ -230,6 +230,19 @@ export const SETTINGS_SHELL_CSS = `
 }
 .stave-settings .addbtn:hover{ border-color:var(--s-accent); color:var(--s-accent-2); }
 
+/* Claude Code bridge */
+.stave-settings .pairing{ display:flex; align-items:center; gap:8px; padding:6px 0; }
+.stave-settings .pairing .code{
+  flex:1; min-width:0; font-family:var(--s-mono); font-size:12px; color:var(--s-text); background:var(--s-surface-2);
+  border:1px solid var(--s-border); border-radius:var(--s-radius-s); padding:5px 9px;
+}
+.stave-settings .pairing .code.err{ border-color:var(--s-danger); }
+.stave-settings .pairing .addbtn{ margin-top:0; }
+.stave-settings .pairing .addbtn:disabled{ opacity:.5; cursor:default; }
+.stave-settings .bridge-status{ display:flex; align-items:baseline; gap:8px; font-size:11.5px; line-height:1.55; padding:4px 0 8px; color:var(--s-text-3); }
+.stave-settings .bridge-status.ok{ color:var(--s-accent-2); }
+.stave-settings .bridge-status.bad{ color:var(--s-danger); }
+
 /* keyboard shortcuts */
 .stave-settings .kb-row{ display:flex; align-items:center; gap:14px; padding:9px 0; border-top:1px solid var(--s-border-soft); }
 .stave-settings .grp .kb-row:first-of-type{ border-top:0; }

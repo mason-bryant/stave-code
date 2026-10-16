@@ -48,7 +48,7 @@ export interface SettingsSectionDef {
   /** simple, coverage-tracked fields. Omitted for custom sections. */
   readonly fields?: readonly SettingFieldDef[];
   /** bespoke content instead of simple fields. */
-  readonly custom?: "modules" | "aliases";
+  readonly custom?: "modules" | "aliases" | "agentBridge";
 }
 
 const THEME_OPTIONS: readonly SelectOption[] = [
@@ -146,6 +146,7 @@ export const SECTION_DEFS: readonly SettingsSectionDef[] = [
   },
   { id: "modules", navLabel: "Modules", title: "Strudel modules", custom: "modules" },
   { id: "aliases", navLabel: "Signal Aliases", title: "Signal Aliases", custom: "aliases" },
+  { id: "claude", navLabel: "Claude Code", title: "Claude Code", custom: "agentBridge" },
 ];
 
 /** Flat list of every simple-field key across all sections (coverage token set). */

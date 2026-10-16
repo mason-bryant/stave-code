@@ -57,6 +57,7 @@ import { getTakesPhoneAudio, setTakesPhoneAudioSetting } from "../../state/takes
 import { getVizPreviewHeight, setVizPreviewHeight } from "../../state/vizPreviewHeight";
 import { Switch } from "./Switch";
 import { SettingRow } from "./SettingRow";
+import { AgentBridgeSection } from "./AgentBridgeSection";
 import {
   SECTION_DEFS,
   SETTING_FIELD_KEYS,
@@ -71,6 +72,7 @@ import {
   IconPerf,
   IconModules,
   IconAliases,
+  IconAgent,
 } from "./icons";
 
 type SettingValue = string | number | boolean;
@@ -121,6 +123,7 @@ const NAV_ICONS: Record<string, () => React.ReactElement> = {
   perf: IconPerf,
   modules: IconModules,
   aliases: IconAliases,
+  claude: IconAgent,
 };
 
 // Strudel modules tier UI (Phase 20-14 β-3). MIDI is the only wired row;
@@ -164,6 +167,7 @@ function assertTierSchemaCoverage(): void {
 const CUSTOM_KEYWORDS: Record<string, string> = {
   modules: "strudel modules midi csound tidalcycles osc serial gamepad motion mqtt backend",
   aliases: "signal alias sound name kick snare",
+  agentBridge: "claude code agent ai mcp pairing bridge connect",
 };
 
 function fieldMatches(f: SettingFieldDef, q: string): boolean {
@@ -410,6 +414,7 @@ export function SettingsPanel({ query }: SettingsPanelProps) {
   const renderSectionBody = (sec: SettingsSectionDef): React.ReactNode => {
     if (sec.custom === "modules") return renderModules();
     if (sec.custom === "aliases") return renderAliases();
+    if (sec.custom === "agentBridge") return <AgentBridgeSection />;
     return sec.fields!.map(renderField);
   };
 

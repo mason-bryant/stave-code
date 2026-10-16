@@ -113,6 +113,7 @@ import {
 import { PIANOROLL_HYDRA_CODE, seedMissingPresetFiles } from "../templates";
 import { installBounceProbe } from "../e2e/bounceProbe";
 import { installAssetProbe } from "../e2e/assetProbe";
+import { registerAgentRuntimeAccess, settlesWithin } from "../agentBridge/runtimeAccess";
 import { warmWaveforms } from "../audio/waveformWarm";
 
 
@@ -1461,6 +1462,46 @@ export default function StrudelEditorClient({
         run();
       }),
     [],
+  );
+
+  // The Claude Code bridge (agentBridge/) evaluates songs through the runtimes
+  // held here: whether one is playing, a silent check evaluate of a stopped one
+  // (the Song timeline's — it starts no sound and writes nothing to the
+  // Console), and the outcome of the next evaluation after it changes a file.
+  useEffect(
+    () =>
+      registerAgentRuntimeAccess({
+        isPlaying: (fileId) => runtimesRef.current.get(fileId)?.getIsPlaying() ?? false,
+        checkEvaluate: async (fileId) => {
+          const rt = getOrCreateRuntime(fileId);
+          if (!rt || rt.getIsPlaying()) return null;
+          // Bounded like the timeline's refresh (#1221): never awaited bare.
+          const evaluation = rt.evaluateForTimeline();
+          if (!(await settlesWithin(evaluation, TIMELINE_EVAL_WAIT_MS))) return "timeout";
+          return { error: rt.getTimelineEvalDiagnostics().error };
+        },
+        nextEvaluation: (fileId, timeoutMs) =>
+          new Promise((resolve) => {
+            const rt = runtimesRef.current.get(fileId);
+            if (!rt) {
+              resolve("timeout");
+              return;
+            }
+            let timer: ReturnType<typeof setTimeout> | null = null;
+            const offs: Array<() => void> = [];
+            const finish = (outcome: { error: Error | null } | "timeout"): void => {
+              if (timer === null) return;
+              clearTimeout(timer);
+              timer = null;
+              offs.forEach((off) => off());
+              resolve(outcome);
+            };
+            timer = setTimeout(() => finish("timeout"), timeoutMs);
+            offs.push(rt.onEvaluateSuccess(() => finish({ error: null })));
+            offs.push(rt.onError((error: Error) => finish({ error })));
+          }),
+      }),
+    [getOrCreateRuntime],
   );
 
   // ── Shell callbacks ─────────────────────────────────────────────────

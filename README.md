@@ -122,7 +122,8 @@ stave-code/
 │   │       ├── visualizers/         # Inline viz view-zone pipeline
 │   │       ├── workspace/           # Yjs-backed file store, tabs, splits
 │   │       └── ir/                  # Pattern IR (early — see project docs)
-│   └── app/             # Next.js 16 demo app (Turbopack) — what stave.live runs
+│   ├── app/             # Next.js 16 demo app (Turbopack) — what stave.live runs
+│   └── mcp/             # stave-mcp — lets Claude Code edit a paired Stave tab (see its README)
 └── assets/              # Screenshots, branding
 ```
 
