@@ -53295,6 +53295,7 @@ exports.getCurrentBranch = getCurrentBranch;
 exports.getCurrentHistory = getCurrentHistory;
 exports.getEditorBackdropBlur = getEditorBackdropBlur;
 exports.getEditorFontSize = getEditorFontSize;
+exports.getEditorForFile = getEditorForFile;
 exports.getEditorMinimap = getEditorMinimap;
 exports.getEditorTheme = getEditorTheme;
 exports.getEditorUiIconSize = getEditorUiIconSize;

@@ -337,6 +337,8 @@ export {
   getActiveEditor,
   getActiveFileId,
   onActiveEditorChange,
+  // the app's Claude Code bridge reports which files have an editor open
+  getEditorForFile,
   getEditorFontSize,
   getEditorMinimap,
   setEditorFontSize,

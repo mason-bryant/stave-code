@@ -90,6 +90,14 @@ export const IconAliases = () =>
     </>,
   );
 
+export const IconAgent = () =>
+  svg(
+    <>
+      <path d="M8 9l-3 3 3 3M16 9l3 3-3 3" />
+      <path d="M13.5 6.5l-3 11" />
+    </>,
+  );
+
 export const IconWarn = () =>
   svg(
     <>
