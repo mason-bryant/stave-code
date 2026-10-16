@@ -41,8 +41,7 @@ function actions(over: Partial<MenuActions> = {}): MenuActions {
     zenMode: false,
     onUndo: noop,
     onRedo: noop,
-    canUndo: true,
-    canRedo: false,
+    undoItem: (which) => (which === "undo" ? { label: "Undo Create song.strudel", enabled: true } : { label: "Redo", enabled: false }),
     ...over,
   };
 }
@@ -106,7 +105,7 @@ describe("the menus are one list, drawn twice (#2000)", () => {
   });
 
   it("greys the same items in both", () => {
-    const a = actions({ canBounceToWav: () => false, canUndo: false });
+    const a = actions({ canBounceToWav: () => false, undoItem: (which) => ({ label: which === "undo" ? "Undo" : "Redo", enabled: false }) });
     const off = flatItems(buildMenus(a)).filter((i) => i.disabled).map((i) => i.label);
     expect(off).toEqual(expect.arrayContaining(["Bounce to WAV...", "Undo", "Redo", "Chorus idea"]));
 
@@ -132,6 +131,13 @@ describe("the menus are one list, drawn twice (#2000)", () => {
     fireEvent.click(row("Bassline"));
     fireEvent.click(row("Bounce to WAV..."));
     expect(order).toEqual(["close", "new", "close", "recent:b"]);
+  });
+
+  it("Undo says what it will undo, in both (it is read when the menu is drawn)", () => {
+    const a = actions();
+    expect(menuBarLabels(a)).toContain("Undo Create song.strudel");
+    const { container } = renderDrawer(a);
+    expect([...container.querySelectorAll("[data-stave-menu-item]")].map(labelOf)).toContain("Undo Create song.strudel");
   });
 
   it("names its menus, and shows a note beside an item but not a keyboard shortcut", () => {

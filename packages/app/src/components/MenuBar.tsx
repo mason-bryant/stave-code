@@ -136,7 +136,8 @@ function MenuButton({
   children: React.ReactNode;
 }) {
   return (
-    <div style={styles.menuButtonWrap}>
+    // Opening a menu does not change where its Undo acts (lib/undoFocus).
+    <div style={styles.menuButtonWrap} data-keeps-undo-target>
       <button
         onClick={onClick}
         style={{ ...styles.menuButton, ...(open ? styles.menuButtonOpen : {}) }}

@@ -13,9 +13,14 @@
  * `active` when it always writes to the active code editor (the Pattern panel's
  * grids) — and the app's Undo/Redo ask this module before falling back to the
  * project undo.
+ *
+ * `undoTargetFor` is that routing, for ⌘Z and for Edit → Undo alike. The menu
+ * passes where focus was before the menu was opened, so it acts where ⌘Z
+ * would have. Until it did, Edit → Undo always ran the project undo: after
+ * typing a new song it removed the file, and the song with it.
  */
 
-import { getActiveEditor, getEditorForFile } from './editorRegistry'
+import { getActiveEditor, getEditorForElement, getEditorForFile } from './editorRegistry'
 
 export const CODE_UNDO_ATTR = 'data-code-undo-file'
 /** Marker value for a panel that writes to whichever code editor is active. */
@@ -33,6 +38,38 @@ export function codeEditorForFocus(el: Element | null | undefined): MonacoEditor
   return editor ?? undefined
 }
 
+/** Where Undo/Redo act: one code editor's history, or the project's file changes. */
+export type UndoTarget = { kind: 'code'; editor: MonacoEditor } | { kind: 'files' }
+
+/**
+ * Where Undo and Redo act for focus at `el`: the code editor it is in, the
+ * code editor a panel it is in writes to, or — anywhere else — the project's
+ * file changes.
+ */
+export function undoTargetFor(el: Element | null | undefined): UndoTarget {
+  const editor = getEditorForElement(el) ?? codeEditorForFocus(el)
+  return editor ? { kind: 'code', editor } : { kind: 'files' }
+}
+
+/**
+ * Undo or redo in one code editor's history, through its model. The model's,
+ * not the editor's Undo action: the action focuses the code editor, and the
+ * next key the user types would land in the code instead of the panel they
+ * are working in.
+ */
+export function codeUndo(editor: MonacoEditor, which: 'undo' | 'redo'): void {
+  const model = editor?.getModel?.()
+  if (which === 'undo') model?.undo?.()
+  else model?.redo?.()
+}
+
+/** Whether that history has a step to take; true when the model does not say. */
+export function codeCanUndo(editor: MonacoEditor, which: 'undo' | 'redo'): boolean {
+  const model = editor?.getModel?.()
+  const can = which === 'undo' ? model?.canUndo : model?.canRedo
+  return typeof can === 'function' ? !!can.call(model) : true
+}
+
 /**
  * Undo or redo in the code editor that focus at `el` belongs to. Returns false
  * when focus is not in a panel that writes code — the caller's cue to use the
@@ -43,11 +80,6 @@ export function codeEditorForFocus(el: Element | null | undefined): MonacoEditor
 export function codeUndoForFocus(el: Element | null | undefined, which: 'undo' | 'redo'): boolean {
   const editor = codeEditorForFocus(el)
   if (!editor) return false
-  // The MODEL's history, not the editor's Undo action: the action focuses the
-  // code editor, and the next key the user types would land in the code
-  // instead of the panel they are working in.
-  const model = editor.getModel?.()
-  if (which === 'undo') model?.undo?.()
-  else model?.redo?.()
+  codeUndo(editor, which)
   return true
 }

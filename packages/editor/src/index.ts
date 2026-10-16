@@ -324,6 +324,10 @@ export {
   subscribeToUndoState,
   resetUndoManager,
   withStructBatch,
+  undoFiles,
+  nextFileStep,
+  type FileUndoResult,
+  type NextFileStep,
 } from './workspace/undoManager'
 // #1906 / #1911 — the file route of the code↔view commit door; the Song Timeline's
 // gestures and the app's backdrop write commit through it, and name its refusals.
@@ -977,4 +981,12 @@ export { SONICPI_DOCS_INDEX } from './monaco/docs/sonicpi'
 export { STRUDEL_DOCS_INDEX } from './monaco/strudelDocs'
 
 // #1800 — which code editor ⌘Z means for the focused panel.
-export { CODE_UNDO_ATTR, codeEditorForFocus, codeUndoForFocus } from './workspace/codeUndo'
+export {
+  CODE_UNDO_ATTR,
+  codeEditorForFocus,
+  codeUndoForFocus,
+  undoTargetFor,
+  codeUndo,
+  codeCanUndo,
+  type UndoTarget,
+} from './workspace/codeUndo'

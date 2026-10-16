@@ -2943,6 +2943,14 @@ function getEditorForFile(fileId) {
   return editors.get(fileId);
 }
 __name(getEditorForFile, "getEditorForFile");
+function getEditorForElement(el) {
+  if (!el) return void 0;
+  const holds = /* @__PURE__ */ __name((ed) => !!ed?.getDomNode?.()?.contains(el), "holds");
+  for (const ed of editors.values()) if (holds(ed)) return ed;
+  const all = monacoNs?.editor?.getEditors?.() ?? [];
+  return all.find(holds);
+}
+__name(getEditorForElement, "getEditorForElement");
 var activeEditor = null;
 var activeEditorListeners = /* @__PURE__ */ new Set();
 function setActiveEditor(editor) {
@@ -25523,7 +25531,46 @@ function withStructBatch(fn) {
   return out;
 }
 __name(withStructBatch, "withStructBatch");
+var LABEL = "stave:label";
+var REMOVES = "stave:removes";
+var BEFORE = "stave:before";
+var REORDERED = "stave:reordered";
 var active = null;
+function filePaths(files) {
+  const out = /* @__PURE__ */ new Map();
+  for (const [id, file] of files) {
+    if (file instanceof Y3__namespace.Map) out.set(id, String(file.get("path") ?? id));
+  }
+  return out;
+}
+__name(filePaths, "filePaths");
+var baseName = /* @__PURE__ */ __name((path) => path.slice(path.lastIndexOf("/") + 1), "baseName");
+var dirName = /* @__PURE__ */ __name((path) => path.slice(0, Math.max(0, path.lastIndexOf("/"))), "dirName");
+var someFiles = /* @__PURE__ */ __name((paths) => paths.length === 1 ? baseName(paths[0]) : `${paths.length} files`, "someFiles");
+function describeFileChange(before, after, reordered = false) {
+  const created = [...after].filter(([id]) => !before.has(id)).map(([, p]) => p);
+  const deleted = [...before].filter(([id]) => !after.has(id)).map(([, p]) => p);
+  const renamed = [...after].filter(([id, p]) => before.has(id) && before.get(id) !== p).map(([id, p]) => ({ from: before.get(id), to: p }));
+  const kinds = [created, deleted, renamed].filter((list) => list.length > 0).length;
+  if (kinds > 1) return `Change ${created.length + deleted.length + renamed.length} files`;
+  if (created.length) return `Create ${someFiles(created)}`;
+  if (deleted.length) return `Delete ${someFiles(deleted)}`;
+  if (renamed.length) {
+    if (!renamed.every((r) => baseName(r.from) === baseName(r.to))) {
+      return `Rename ${someFiles(renamed.map((r) => r.from))}`;
+    }
+    const from = new Set(renamed.map((r) => dirName(r.from)));
+    const to = new Set(renamed.map((r) => dirName(r.to)));
+    if (from.size === 1 && to.size === 1) {
+      const [f] = from;
+      const [t] = to;
+      if (f && t && dirName(f) === dirName(t)) return `Rename folder ${baseName(f)}`;
+    }
+    return `Move ${someFiles(renamed.map((r) => r.from))}`;
+  }
+  return reordered ? "Reorder files" : null;
+}
+__name(describeFileChange, "describeFileChange");
 function ensureUndoManager() {
   if (active) return active.um;
   const doc = getActiveDoc();
@@ -25531,6 +25578,7 @@ function ensureUndoManager() {
   const fileOrder = doc.getMap("fileOrder");
   const subfolderOrder = doc.getMap("subfolderOrder");
   const childOrder = doc.getMap("childOrder");
+  const orderMaps = [fileOrder, subfolderOrder, childOrder];
   const um = new Y3__namespace.UndoManager([files, fileOrder, subfolderOrder, childOrder], {
     trackedOrigins: /* @__PURE__ */ new Set([STRUCT_ORIGIN]),
     captureTimeout: 300
@@ -25547,23 +25595,58 @@ function ensureUndoManager() {
     }
   }, "filesObserver");
   files.observe(filesObserver);
+  let knownPaths = filePaths(files);
+  const filesType = files;
+  const touchesPaths = /* @__PURE__ */ __name((tr) => {
+    for (const [type, keys] of tr.changed) {
+      if (type === filesType) return true;
+      if (type._item?.parent === filesType && keys.has("path")) return true;
+    }
+    return false;
+  }, "touchesPaths");
+  const refreshPaths = /* @__PURE__ */ __name((tr) => {
+    if (touchesPaths(tr)) knownPaths = filePaths(files);
+  }, "refreshPaths");
+  doc.on("afterTransaction", refreshPaths);
+  const recordStep = /* @__PURE__ */ __name((event, isNew) => {
+    if (event.origin === um) return;
+    const meta = event.stackItem.meta;
+    if (isNew) meta.set(BEFORE, knownPaths);
+    const before = meta.get(BEFORE) ?? knownPaths;
+    const after = filePaths(files);
+    const reordered = meta.get(REORDERED) === true || orderMaps.some((m) => event.changedParentTypes.has(m));
+    meta.set(REORDERED, reordered);
+    meta.set(LABEL, describeFileChange(before, after, reordered));
+    meta.set(REMOVES, [...after.keys()].filter((id) => !before.has(id)));
+  }, "recordStep");
   const listeners18 = /* @__PURE__ */ new Set();
   const notify6 = /* @__PURE__ */ __name(() => {
     for (const l of listeners18) l();
   }, "notify");
-  const onStackItemAdded = /* @__PURE__ */ __name(() => notify6(), "onStackItemAdded");
+  const onStackItemAdded = /* @__PURE__ */ __name((event) => {
+    recordStep(event, true);
+    notify6();
+  }, "onStackItemAdded");
+  const onStackItemUpdated = /* @__PURE__ */ __name((event) => {
+    recordStep(event, false);
+    notify6();
+  }, "onStackItemUpdated");
   const onStackItemPopped = /* @__PURE__ */ __name(() => notify6(), "onStackItemPopped");
   const onStackCleared = /* @__PURE__ */ __name(() => notify6(), "onStackCleared");
   um.on("stack-item-added", onStackItemAdded);
+  um.on("stack-item-updated", onStackItemUpdated);
   um.on("stack-item-popped", onStackItemPopped);
   um.on("stack-cleared", onStackCleared);
   active = {
     um,
+    files,
     listeners: listeners18,
     cleanup: /* @__PURE__ */ __name(() => {
       um.off("stack-item-added", onStackItemAdded);
+      um.off("stack-item-updated", onStackItemUpdated);
       um.off("stack-item-popped", onStackItemPopped);
       um.off("stack-cleared", onStackCleared);
+      doc.off("afterTransaction", refreshPaths);
       files.unobserve(filesObserver);
       um.destroy();
     }, "cleanup")
@@ -25578,16 +25661,55 @@ function resetUndoManager() {
   }
 }
 __name(resetUndoManager, "resetUndoManager");
-function undo() {
+function undoFiles(which, onlyIf) {
   const um = ensureUndoManager();
-  const result = um.undo();
-  return result !== null;
+  const { files, listeners: listeners18 } = active;
+  const from = which === "undo" ? um.undoStack : um.redoStack;
+  if (onlyIf !== void 0 && from[from.length - 1] !== onlyIf) return null;
+  const before = filePaths(files);
+  const done = which === "undo" ? um.undo() : um.redo();
+  if (!done) return null;
+  const after = filePaths(files);
+  const removed = [...before.keys()].filter((id) => !after.has(id));
+  const restored = [...after.keys()].filter((id) => !before.has(id));
+  const label = done.meta.get(LABEL) ?? null;
+  const to = which === "undo" ? um.redoStack : um.undoStack;
+  const reverse = to[to.length - 1] ?? null;
+  if (reverse) {
+    reverse.meta.set(LABEL, label);
+    reverse.meta.set(REMOVES, restored);
+  }
+  for (const l of listeners18) l();
+  return {
+    label,
+    removed: removed.map((id) => before.get(id)),
+    restored: restored.map((id) => after.get(id)),
+    reverse
+  };
+}
+__name(undoFiles, "undoFiles");
+function nextFileStep(which) {
+  const um = ensureUndoManager();
+  const { files } = active;
+  const stack = which === "undo" ? um.undoStack : um.redoStack;
+  const item = stack[stack.length - 1];
+  if (!item) return null;
+  const removes = [];
+  for (const id of item.meta.get(REMOVES) ?? []) {
+    const file = files.get(id);
+    if (!(file instanceof Y3__namespace.Map)) continue;
+    const content = file.get("content");
+    removes.push({ id, path: String(file.get("path") ?? id), content: content instanceof Y3__namespace.Text ? content.toString() : "" });
+  }
+  return { label: item.meta.get(LABEL) ?? null, removes, token: item };
+}
+__name(nextFileStep, "nextFileStep");
+function undo() {
+  return undoFiles("undo") !== null;
 }
 __name(undo, "undo");
 function redo() {
-  const um = ensureUndoManager();
-  const result = um.redo();
-  return result !== null;
+  return undoFiles("redo") !== null;
 }
 __name(redo, "redo");
 function canUndo() {
@@ -36118,12 +36240,27 @@ function codeEditorForFocus(el) {
   return editor ?? void 0;
 }
 __name(codeEditorForFocus, "codeEditorForFocus");
+function undoTargetFor(el) {
+  const editor = getEditorForElement(el) ?? codeEditorForFocus(el);
+  return editor ? { kind: "code", editor } : { kind: "files" };
+}
+__name(undoTargetFor, "undoTargetFor");
+function codeUndo(editor, which) {
+  const model = editor?.getModel?.();
+  if (which === "undo") model?.undo?.();
+  else model?.redo?.();
+}
+__name(codeUndo, "codeUndo");
+function codeCanUndo(editor, which) {
+  const model = editor?.getModel?.();
+  const can = which === "undo" ? model?.canUndo : model?.canRedo;
+  return typeof can === "function" ? !!can.call(model) : true;
+}
+__name(codeCanUndo, "codeCanUndo");
 function codeUndoForFocus(el, which) {
   const editor = codeEditorForFocus(el);
   if (!editor) return false;
-  const model = editor.getModel?.();
-  if (which === "undo") model?.undo?.();
-  else model?.redo?.();
+  codeUndo(editor, which);
   return true;
 }
 __name(codeUndoForFocus, "codeUndoForFocus");
@@ -53220,7 +53357,9 @@ exports.clearCapture = clearCapture;
 exports.clearIRSnapshot = clearIRSnapshot;
 exports.clearLog = clearLog;
 exports.clearShellState = clearShellState;
+exports.codeCanUndo = codeCanUndo;
 exports.codeEditorForFocus = codeEditorForFocus;
+exports.codeUndo = codeUndo;
 exports.codeUndoForFocus = codeUndoForFocus;
 exports.collectUnusedSounds = collectUnusedSounds;
 exports.commitToFile = commitToFile;
@@ -53414,6 +53553,7 @@ exports.merge = merge;
 exports.midiToPitch = midiToPitch;
 exports.mountVizPreview = mountVizPreview;
 exports.mountVizRenderer = mountVizRenderer;
+exports.nextFileStep = nextFileStep;
 exports.nextTakeName = nextTakeName;
 exports.normalizeChord = normalizeChord;
 exports.normalizeEdits = normalizeEdits;
@@ -53653,6 +53793,8 @@ exports.touchProject = touchProject;
 exports.trackIdentity = trackIdentity;
 exports.transpose = transpose;
 exports.undo = undo;
+exports.undoFiles = undoFiles;
+exports.undoTargetFor = undoTargetFor;
 exports.uniqueSoundName = uniqueSoundName;
 exports.unregisterAsset = unregisterAsset;
 exports.unregisterBottomPanelTab = unregisterBottomPanelTab;

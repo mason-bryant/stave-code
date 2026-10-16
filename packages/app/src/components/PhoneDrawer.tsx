@@ -87,7 +87,9 @@ export function PhoneDrawer({ openOn, projectName, onSelect, onClose, renderPane
   );
 
   return (
-    <div style={styles.layer} data-phone-drawer-layer>
+    // Working in the drawer does not change where its Edit → Undo acts: that is
+    // where the user was before opening it (lib/undoFocus).
+    <div style={styles.layer} data-phone-drawer-layer data-keeps-undo-target>
       {/* a tap beside the drawer closes it */}
       <div style={styles.scrim} data-phone-drawer-scrim onClick={onClose} />
       <div style={styles.drawer} data-phone-drawer role="dialog" aria-label="Project and menus">
