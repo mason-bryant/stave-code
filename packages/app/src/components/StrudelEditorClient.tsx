@@ -114,6 +114,7 @@ import { PIANOROLL_HYDRA_CODE, seedMissingPresetFiles } from "../templates";
 import { installBounceProbe } from "../e2e/bounceProbe";
 import { installAssetProbe } from "../e2e/assetProbe";
 import { registerAgentRuntimeAccess, settlesWithin } from "../agentBridge/runtimeAccess";
+import { markAgentProjectReady } from "../agentBridge/projectAccess";
 import { warmWaveforms } from "../audio/waveformWarm";
 
 
@@ -1003,16 +1004,27 @@ export default function StrudelEditorClient({
   // idle + unload auto-commit driver. Per-eval commits are fired from
   // onEvaluateSuccess below. Runs alongside the legacy snapshotStore-backed
   // Version History panel; Phase G (#197) unifies the UI and retires the old.
+  //
+  // Once History has started (or failed to), the project is ready for the Claude
+  // Code bridge: a switch it asked for answers only then, so the agent's next
+  // write lands in this project and is recorded as its own commit. The bundled
+  // visuals were seeded by an earlier effect of this same mount.
   useEffect(() => {
     let cancelled = false;
     let teardown = () => {};
+    let unready = () => {};
     (async () => {
-      await initHistory(projectId);
-      if (cancelled) return;
-      teardown = startHistoryDriver();
+      try {
+        await initHistory(projectId);
+        if (cancelled) return;
+        teardown = startHistoryDriver();
+      } finally {
+        if (!cancelled) unready = markAgentProjectReady(projectId);
+      }
     })().catch((err) => console.warn("[stave] history init failed:", err));
     return () => {
       cancelled = true;
+      unready();
       teardown();
       resetHistoryState();
     };

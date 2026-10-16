@@ -2,7 +2,8 @@
 
 A local [MCP](https://modelcontextprotocol.io) server that lets Claude Code read and change
 the songs and visuals in a Stave tab you have open — and see what it did: evaluation errors
-come back with each change, and it can take a picture of a visual.
+come back with each change, and it can take a picture of a visual. It can also start a new
+project in that tab, or switch it to another of your projects.
 
 ```
 Claude Code ──stdio (MCP)──▶ stave-mcp ──WebSocket, 127.0.0.1──▶ your Stave tab
@@ -48,6 +49,18 @@ Code sessions. `stave-mcp reset-pairing` replaces it.
 | `rename_file` | Rename or move, keeping its type. |
 | `get_diagnostics` | Evaluate a file as Stave would and return its errors. |
 | `capture_canvas` | A PNG of what a visual is drawing on screen. |
+| `list_projects` | Every project in the tab's browser, most recently opened first; which one is open. |
+| `create_project` | A new, empty project, and switch the tab to it. Answers once it is ready for files. |
+| `open_project` | Switch the tab to another project, by id or exact name. |
+
+The file tools act on the project open in the tab. `create_project` and `open_project` switch
+it the way the project switcher does: the project you had open is saved as it is, anything
+playing stops, and the call answers only once the new project's editor and History have
+started — so a `create_file` straight after lands in it and is recorded. They refuse, and say
+why, while you are viewing a past version from History, while the tab is already switching,
+or while storage is full and the open project holds changes the disk refused (leaving would
+lose them). `create_project` also refuses a name a project already has, so `open_project`
+by name stays unambiguous.
 
 Every change:
 
@@ -82,8 +95,9 @@ already running as you could stand in for stave-mcp there — but such a program
 token file, and your files, anyway.
 
 Tab-side, the agent can only do what the workspace API offers: read, write, create and
-rename files in the open project. It cannot delete files, touch other projects, or reach
-assets, and it refuses to write while you are viewing a past version from History.
+rename files in the open project, and create or switch to a project. It cannot delete files
+or projects, change a project it has not opened, or reach assets, and it refuses to write
+(or switch) while you are viewing a past version from History.
 
 ## Which browsers can connect
 
@@ -126,6 +140,10 @@ is cited, not measured, where the table says so.
   project); after that stave-mcp sends the requests in [`src/protocol.ts`](src/protocol.ts) and
   the tab answers them one at a time, so two writes never interleave. The app takes only
   types from this package; `protocolConstants.test.ts` holds its copy of the codes equal.
+- **Adding a method does not bump `PROTOCOL_VERSION`.** A tab without it answers -32601
+  (method not found), and the tool tells the agent the tab needs reloading; every other tool
+  keeps working with that tab. A bump would refuse the older tab outright. The version moves
+  only when an existing method changes shape.
 
 ## Environment
 
@@ -140,8 +158,10 @@ is cited, not measured, where the table says so.
 - `pnpm --filter @stave/mcp test` — the bridge's refusals (origin, host, token, protocol),
   request/response, timeouts, takeover, a busy port; and each MCP tool's mapping.
 - `packages/app/src/agentBridge/__tests__` — the tab side: the diff, exact-text edits, the
-  connector's states, and the handlers against the real workspace store.
+  connector's states, and the handlers against the real workspace store (the project
+  handlers against a stand-in for the app's project list).
 - `packages/app/tests/agent-bridge.spec.ts` — end to end: the real CLI over stdio and a dev
   tab paired through Settings. The user's cursor stays put, one undo reverts an edit, History
   records it, a playing song re-evaluates and reports a bad edit's error, a Hydra visual on
-  screen redraws and is captured.
+  screen redraws and is captured, and a project the agent creates takes its next file and
+  History commit before `open_project` switches back.

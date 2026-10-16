@@ -12,7 +12,9 @@ export type {
   HelloResult,
   ParamsOf,
   ProjectInfo,
+  ProjectOpened,
   ProjectStatus,
+  ProjectSummary,
   ResultOf,
   StaveMethod,
   StaveMethods,
@@ -45,6 +47,8 @@ export const ERROR_CODES = {
   noCanvas: 1007,
   badPath: 1008,
   badToken: 1009,
+  unsaved: 1010,
+  badName: 1011,
 } as const;
 
 /** An error a handler throws to answer a request with a specific code. */

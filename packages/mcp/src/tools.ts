@@ -8,7 +8,7 @@ import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
 import { z } from 'zod'
 
 import { BridgeError, type BridgeLike } from './bridge'
-import type { Diagnostics, DiagnosticEntry, WriteResult } from './protocol'
+import type { Diagnostics, DiagnosticEntry, ProjectOpened, ProjectSummary, WriteResult } from './protocol'
 
 export interface ToolContext {
   /** The code the user pastes into Stave → Settings → Claude Code. */
@@ -29,6 +29,12 @@ function text(t: string): CallToolResult {
 function failure(t: string): CallToolResult {
   return { content: [{ type: 'text', text: t }], isError: true }
 }
+
+/** JSON-RPC "method not found": the tab runs a Stave from before this tool existed. */
+const METHOD_NOT_FOUND = -32601
+
+/** How long a project switch may take: its storage, then the editor and History starting on it. */
+const PROJECT_SWITCH_TIMEOUT_MS = 25_000
 
 function notConnectedMessage(bridge: BridgeLike, ctx: ToolContext): string {
   const s = bridge.status()
@@ -78,6 +84,29 @@ export function formatDiagnostics(d: Diagnostics): string {
   return lines.join('\n')
 }
 
+/** A timestamp as UTC to the minute, e.g. "2026-10-16 19:01 UTC". */
+function when(ms: number): string {
+  return `${new Date(ms).toISOString().slice(0, 16).replace('T', ' ')} UTC`
+}
+
+function formatProjectRow(p: ProjectSummary): string {
+  return `- "${p.name}"${p.open ? ' [open]' : ''} — id ${p.id}, last opened ${when(p.lastOpenedAt)}`
+}
+
+function formatOpened(verb: 'Created' | 'Opened', r: ProjectOpened): string {
+  const files = `${r.files} file${r.files === 1 ? '' : 's'}`
+  const head =
+    verb === 'Created'
+      ? `Created project "${r.project.name}" (id ${r.project.id}) and switched the Stave tab to it. It has no files of its own yet, only Stave's bundled visuals under preset/ (${files}). Add files with create_file.`
+      : r.switched
+        ? `Switched the Stave tab to project "${r.project.name}" (id ${r.project.id}, ${files}).`
+        : `Project "${r.project.name}" (id ${r.project.id}, ${files}) was already open; nothing changed.`
+  const tail = r.ready
+    ? 'The file tools now act on this project.'
+    : 'It has not finished loading yet; call stave_status and wait for it before writing to it.'
+  return `${head}\n${tail}`
+}
+
 function formatWrite(verb: string, r: WriteResult): string {
   if (!r.changed) return `${r.path} already had exactly this content; nothing changed.\n${formatDiagnostics(r.diagnostics)}`
   const where =
@@ -97,6 +126,11 @@ export function registerStaveTools(server: McpServer, bridge: BridgeLike, ctx: T
     } catch (err) {
       if (err instanceof BridgeError) {
         if (!bridge.status().page) return failure(`${err.message}\n\n${notConnectedMessage(bridge, ctx)}`)
+        if (err.code === METHOD_NOT_FOUND) {
+          return failure(
+            `The paired Stave tab runs an older Stave that cannot do this yet (${err.message}). Ask the user to reload the tab, or update their Stave checkout and restart its dev server.`,
+          )
+        }
         return failure(err.message)
       }
       return failure(err instanceof Error ? err.message : String(err))
@@ -290,5 +324,64 @@ export function registerStaveTools(server: McpServer, bridge: BridgeLike, ctx: T
           ],
         }
       }),
+  )
+
+  server.registerTool(
+    'list_projects',
+    {
+      title: 'List Stave projects',
+      description:
+        'List the projects saved in the paired Stave tab’s browser (Stave keeps projects only there), most recently opened first, marking the one that is open. The file tools act on the open project; open_project switches to another, create_project makes a new one.',
+      annotations: { readOnlyHint: true, openWorldHint: false },
+    },
+    () =>
+      run(async () => {
+        const { projects } = await bridge.call('projects.list', {})
+        if (projects.length === 0) return text('There are no projects in this Stave tab.')
+        const n = projects.length
+        return text(`${n} project${n === 1 ? '' : 's'}, most recently opened first:\n${projects.map(formatProjectRow).join('\n')}`)
+      }),
+  )
+
+  server.registerTool(
+    'create_project',
+    {
+      title: 'Create a Stave project',
+      description: [
+        'Create a new, empty project in the paired Stave tab and switch the tab to it, so the user sees it and the file tools act on it. Answers once the project is ready, so a create_file right after lands in it.',
+        'The project the user had open is saved as it is and stays in their list (open_project switches back); anything playing stops.',
+        'A new project has no files of its own — only Stave’s bundled visuals under preset/. Fails if a project with that name already exists.',
+      ].join(' '),
+      inputSchema: { name: z.string().trim().min(1).describe('The new project’s name, as the user will see it in their project list.') },
+      annotations: { destructiveHint: false, idempotentHint: false, openWorldHint: false },
+    },
+    ({ name }) =>
+      run(async () => {
+        const r = await bridge.call('projects.create', { name }, { timeoutMs: PROJECT_SWITCH_TIMEOUT_MS })
+        return text(formatOpened('Created', r))
+      }),
+  )
+
+  server.registerTool(
+    'open_project',
+    {
+      title: 'Open a Stave project',
+      description:
+        'Switch the paired Stave tab to one of its other projects, named by `id` or by exact `name` as list_projects shows them (give one). The project the user had open is saved as it is; anything playing stops. The file tools then act on the project opened.',
+      inputSchema: {
+        id: z.string().min(1).optional().describe('The project’s id, from list_projects.'),
+        name: z.string().min(1).optional().describe('The project’s exact name, from list_projects.'),
+      },
+      annotations: { destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    },
+    ({ id, name }) => {
+      if ((id === undefined) === (name === undefined)) {
+        return Promise.resolve(failure('Give open_project either `id` or `name` (one of them), as list_projects shows them.'))
+      }
+      return run(async () => {
+        const r = await bridge.call('projects.open', id !== undefined ? { id } : { name: name! }, { timeoutMs: PROJECT_SWITCH_TIMEOUT_MS })
+        return text(formatOpened('Opened', r))
+      })
+    },
   )
 }

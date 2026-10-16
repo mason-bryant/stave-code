@@ -73,7 +73,7 @@ import {
 } from "./backdropCropStore";
 import { DialogHost } from "./DialogHost";
 import { showPrompt, showToast, showConfirm } from "../dialogs/host";
-import { getAgentBridge, startAgentBridge } from "../agentBridge";
+import { ProjectSwitchRefused, getAgentBridge, registerAgentProjectAccess, startAgentBridge } from "../agentBridge";
 import { CommandPalette, type PaletteRow } from "./CommandPalette";
 import { WorkspaceSearchView, type WorkspaceSearchViewHandle } from "./WorkspaceSearchView";
 import { ActivityBar } from "./ActivityBar";
@@ -1580,6 +1580,49 @@ export function StaveApp({ initialProject }: StaveAppProps) {
       setSwitching(false);
     }
   }, [refreshProjects]);
+
+  // The Claude Code bridge's project tools (agentBridge/projectAccess.ts): the
+  // switcher's steps, but a refusal or a failure is thrown back to the agent as
+  // well as shown to the user.
+  const switchingRef = useRef(switching);
+  switchingRef.current = switching;
+  useEffect(() => {
+    const enter = async (target: () => Promise<ProjectMeta>): Promise<ProjectMeta> => {
+      if (switchingRef.current) throw new ProjectSwitchRefused("busy");
+      if (unsavedBlocksLeaving()) throw new ProjectSwitchRefused("unsaved");
+      switchingRef.current = true;
+      setSwitching(true);
+      try {
+        const meta = await target();
+        resetFileStore();
+        await switchProject(meta.id);
+        await touchProject(meta.id);
+        const list = await listProjects();
+        const entered = list.find((p) => p.id === meta.id) ?? meta;
+        setProjects(list);
+        setActiveProject(entered);
+        return entered;
+      } catch (err) {
+        console.warn("[stave] agent bridge: project switch failed:", err);
+        showToast(`Couldn't switch project — ${(err as Error).message ?? "see console"}`, "error");
+        throw err;
+      } finally {
+        setSwitching(false);
+      }
+    };
+    return registerAgentProjectAccess({
+      list: () => listProjects(),
+      // Empty, as the Blank template makes it; the editor seeds the bundled
+      // visuals when it mounts on the new project.
+      create: (name) => enter(() => createProject(name)),
+      open: (id) =>
+        enter(async () => {
+          const meta = await getProject(id);
+          if (!meta) throw new Error(`there is no project ${id}`);
+          return meta;
+        }),
+    });
+  }, [unsavedBlocksLeaving]);
 
   const handleRenameActiveProject = useCallback(async () => {
     const newName = await showPrompt({

@@ -30,8 +30,10 @@ Claude Code it reads *Waiting for stave-mcp*, and the tab reconnects by itself n
 ## What Claude can do
 
 Ask in plain words — "make the hi-hats double time", "add a Hydra visual that pulses with the
-kick and show it with the drums". Claude can list, read, edit, create and rename the project's
-files, check them for errors, and take a picture of a visual on screen.
+kick and show it with the drums", "start a new project for a drum-and-bass track". Claude can
+list, read, edit, create and rename the project's files, check them for errors, and take a
+picture of a visual on screen. It can also list your projects, start a new one, and switch
+your tab to another.
 
 Each change it makes:
 
@@ -46,8 +48,20 @@ Claude also sees what you would see: if a change does not evaluate, the error co
 with the line number, and it can look at a visual to judge the result. A visual has to be on
 screen (open it and press its Play) for Claude to see it draw.
 
-Claude cannot delete files, open other projects, or change anything while you are viewing a
-past version from History.
+## New projects and switching
+
+When Claude starts a project, your tab switches to it, just as if you had picked
+**File ▸ New Project** with the *Blank* template: the project you were in is saved and stays in
+your list, and anything playing stops. The new project has no files of its own until Claude
+adds them. Switching to another project works the same way. Open the project switcher to go
+back whenever you like, or ask Claude to.
+
+Claude will not switch projects while you are viewing a past version from History, or while
+storage is full and your project has changes that could not be saved — leaving then would
+lose them. It tells you why instead.
+
+Claude cannot delete files or projects, or change anything while you are viewing a past
+version from History.
 
 ## Which browser
 
